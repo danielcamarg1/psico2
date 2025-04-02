@@ -7,9 +7,16 @@ import gspread
 from gspread_dataframe import set_with_dataframe
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
-from flask import Flask
+from flask import Flask, jsonify, request
 
 app = Flask(__name__)
+
+# 🔒 Token seguro para acesso à API
+TOKEN_ACESSO = "f9a3d2a5c8b14e2a94db394a7c8e48fa"
+
+@app.route("/")  # 🟢 Para o UptimeRobot
+def rota_raiz():
+    return "🟢 Servidor ativo", 200
 
 @app.route("/executar")
 def rota_executar():
@@ -19,12 +26,37 @@ def rota_executar():
     except Exception as e:
         return f"❌ Erro na execução: {str(e)}"
 
-@app.route("/")  # 🟢 Para o UptimeRobot
-def rota_raiz():
-    return "🟢 Servidor ativo", 200
+@app.route("/dados")
+def rota_dados():
+    token_usuario = request.args.get("token")
+    if token_usuario != TOKEN_ACESSO:
+        return jsonify({"erro": "Token inválido"}), 403
+
+    try:
+        SCOPES = [
+            'https://spreadsheets.google.com/feeds',
+            'https://www.googleapis.com/auth/drive',
+            'https://www.googleapis.com/auth/spreadsheets'
+        ]
+        SERVICE_ACCOUNT_INFO = json.loads(os.environ["GOOGLE_CREDENTIALS"])
+        creds = Credentials.from_service_account_info(SERVICE_ACCOUNT_INFO, scopes=SCOPES)
+        gc = gspread.authorize(creds)
+
+        nome_planilha = "Base Consolidada Prontuários"
+        planilha = gc.open(nome_planilha)
+        aba = planilha.get_worksheet(0)
+        valores = aba.get_all_values()
+
+        if not valores:
+            return jsonify([])
+
+        df = pd.DataFrame(valores[1:], columns=valores[0])
+        return jsonify(df.to_dict(orient='records'))
+
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
 
 def executar():
-    # === 1. Autenticação via variável de ambiente ===
     SCOPES = ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/spreadsheets']
     GOOGLE_CREDENTIALS = os.environ.get('GOOGLE_CREDENTIALS')
     creds_dict = json.loads(GOOGLE_CREDENTIALS)
@@ -35,11 +67,9 @@ def executar():
 
     print("🔐 Autenticação com a conta de serviço concluída.")
 
-    # === 2. IDs das pastas no Drive ===
     DADOS_FOLDER_ID = '1mxpERYY4ormmLjxYUOyEKQoePhjLetJp'
     PRONTUARIOS_FOLDER_ID = '1MnwxFAo15ZsOvTjBJcVEgIQcOCUbmekd'
 
-    # === 3. Função para calcular idade ===
     def calcular_idade(data_nascimento_str):
         try:
             nascimento = pd.to_datetime(data_nascimento_str, errors='coerce', dayfirst=True)
@@ -49,7 +79,6 @@ def executar():
         except:
             return None
 
-    # === 4. Função para baixar arquivos .xls de uma pasta do Drive ===
     def baixar_arquivos_xls(folder_id):
         arquivos = []
         response = drive_service.files().list(
@@ -67,7 +96,6 @@ def executar():
             arquivos.append((file['name'], temp_file.name))
         return arquivos
 
-    # === 5. Processar arquivos /dados ===
     dados_colunas = ['Nome Completo', 'Data de Nascimento', 'Sexo', 'Cidade', 'Profissão']
     dados_df_list = []
     for nome, caminho in baixar_arquivos_xls(DADOS_FOLDER_ID):
@@ -91,7 +119,6 @@ def executar():
     }, inplace=True)
     dados_df['Idade'] = dados_df['Data_Nascimento'].apply(calcular_idade)
 
-    # === 6. Processar arquivos /prontuarios ===
     pront_colunas = ['Nome do Paciente', 'Diagnóstico', 'Plano de Tratamento', 'Avaliação da Demanda', 'Registro de Encerramento']
     prontuarios_df_list = []
     for nome, caminho in baixar_arquivos_xls(PRONTUARIOS_FOLDER_ID):
@@ -108,10 +135,8 @@ def executar():
     prontuarios_df = pd.concat(prontuarios_df_list, ignore_index=True)
     prontuarios_df.rename(columns={'Nome do Paciente': 'Nome'}, inplace=True)
 
-    # === 7. Consolidar ===
     base_consolidada = pd.merge(prontuarios_df, dados_df, on='Nome', how='left')
 
-    # === 8. Atualizar planilha Google Sheets ===
     nome_planilha = "Base Consolidada Prontuários"
     planilha = gc.open(nome_planilha)
     aba = planilha.get_worksheet(0) or planilha.add_worksheet(title="Consolidado", rows="1000", cols="20")
@@ -120,48 +145,5 @@ def executar():
 
     print(f"✅ Planilha atualizada com sucesso: https://docs.google.com/spreadsheets/d/{planilha.id}/edit")
 
-# === Iniciar servidor Flask no Render ===
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
-
-
-
-from flask import jsonify, request
-
-# 🔒 Token seguro para acesso à API
-TOKEN_ACESSO = "f9a3d2a5c8b14e2a94db394a7c8e48fa"
-
-@app.route("/dados", methods=["GET"])
-def rota_dados():
-    token = request.args.get("token")
-    if token != TOKEN_ACESSO:
-        return jsonify({"erro": "Acesso negado"}), 403
-
-    try:
-        
-        SCOPES = [
-            'https://spreadsheets.google.com/feeds',
-            'https://www.googleapis.com/auth/drive',
-            'https://www.googleapis.com/auth/spreadsheets'
-        ]
-
-        # Verifica se há variável GOOGLE_CREDENTIALS no ambiente (formato JSON em string)
-        import json
-        SERVICE_ACCOUNT_FILE = json.loads(os.environ["GOOGLE_CREDENTIALS"])
-
-        from google.oauth2.service_account import Credentials
-        creds = Credentials.from_service_account_info(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
-        gc = gspread.authorize(creds)
-
-        nome_planilha = "Base Consolidada Prontuários"
-        planilha = gc.open(nome_planilha)
-        aba = planilha.get_worksheet(0)
-
-        dados = aba.get_all_records()
-        return jsonify(dados)
-    except Exception as e:
-        return jsonify({"erro": str(e)}), 500
-
-
-
-
