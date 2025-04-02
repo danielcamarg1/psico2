@@ -1,4 +1,5 @@
 import os
+import json
 import pandas as pd
 import tempfile
 from datetime import datetime
@@ -18,15 +19,17 @@ def rota_executar():
     except Exception as e:
         return f"❌ Erro na execução: {str(e)}"
 
-@app.route("/")  # 🟢 Para o UptimeRobot (opcional)
+@app.route("/")  # 🟢 Para o UptimeRobot
 def rota_raiz():
     return "🟢 Servidor ativo", 200
 
 def executar():
-    # === 1. Autenticacao ===
+    # === 1. Autenticação via variável de ambiente ===
     SCOPES = ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/spreadsheets']
-    SERVICE_ACCOUNT_FILE = 'credentials.json'
-    creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
+    GOOGLE_CREDENTIALS = os.environ.get('GOOGLE_CREDENTIALS')
+    creds_dict = json.loads(GOOGLE_CREDENTIALS)
+    creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+
     gc = gspread.authorize(creds)
     drive_service = build('drive', 'v3', credentials=creds)
 
@@ -50,13 +53,11 @@ def executar():
     def baixar_arquivos_xls(folder_id):
         arquivos = []
         response = drive_service.files().list(
-            q=f"'{folder_id}' in parents and (mimeType='application/vnd.ms-excel' or name contains '.xls')",
+            q=f"'{folder_id}' in parents and (mimeType contains 'spreadsheet' or name contains '.xls')",
             spaces='drive',
             fields="files(id, name)"
         ).execute()
-
         print(f"📂 {len(response.get('files', []))} arquivos encontrados na pasta {folder_id}")
-
         for file in response.get('files', []):
             request = drive_service.files().get_media(fileId=file['id'])
             temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.xls')
@@ -119,6 +120,7 @@ def executar():
 
     print(f"✅ Planilha atualizada com sucesso: https://docs.google.com/spreadsheets/d/{planilha.id}/edit")
 
-# Rodar app se for executado diretamente (opcional para testes locais)
+# === Iniciar servidor Flask no Render ===
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=81)
+    app.run(host="0.0.0.0", port=10000)
+
