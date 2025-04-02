@@ -138,8 +138,13 @@ def rota_dados():
         return jsonify({"erro": "Acesso negado"}), 403
 
     try:
-        SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
         
+        SCOPES = [
+            'https://spreadsheets.google.com/feeds',
+            'https://www.googleapis.com/auth/drive',
+            'https://www.googleapis.com/auth/spreadsheets'
+        ]
+
         # Verifica se há variável GOOGLE_CREDENTIALS no ambiente (formato JSON em string)
         import json
         SERVICE_ACCOUNT_FILE = json.loads(os.environ["GOOGLE_CREDENTIALS"])
