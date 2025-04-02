@@ -124,3 +124,39 @@ def executar():
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
 
+
+
+from flask import jsonify, request
+
+# 🔒 Token seguro para acesso à API
+TOKEN_ACESSO = "f9a3d2a5c8b14e2a94db394a7c8e48fa"
+
+@app.route("/dados", methods=["GET"])
+def rota_dados():
+    token = request.args.get("token")
+    if token != TOKEN_ACESSO:
+        return jsonify({"erro": "Acesso negado"}), 403
+
+    try:
+        SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
+        
+        # Verifica se há variável GOOGLE_CREDENTIALS no ambiente (formato JSON em string)
+        import json
+        SERVICE_ACCOUNT_FILE = json.loads(os.environ["GOOGLE_CREDENTIALS"])
+
+        from google.oauth2.service_account import Credentials
+        creds = Credentials.from_service_account_info(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
+        gc = gspread.authorize(creds)
+
+        nome_planilha = "Base Consolidada Prontuários"
+        planilha = gc.open(nome_planilha)
+        aba = planilha.get_worksheet(0)
+
+        dados = aba.get_all_records()
+        return jsonify(dados)
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+
+
+
